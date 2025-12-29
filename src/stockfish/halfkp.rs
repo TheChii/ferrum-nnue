@@ -90,11 +90,16 @@ impl BinRead for SfHalfKpNetwork {
 
 ///The Stockfish HalfKP accumulator state. Use [`add`](Self::add) and [`sub`](Self::sub)
 ///to add and remove input features, and [`activate`](Self::activate) to get an output.
+///
+///This struct is now `Clone` to support efficient state copying for search tree branching.
+#[derive(Clone)]
 pub struct SfHalfKpState<'m> {
-    model: &'m SfHalfKpModel,
-    //Already normalized king positions
-    kings: [Square; Color::NUM],
-    accumulator:  [[i16; IL_OUT]; Color::NUM]
+    /// Reference to the model (for index calculations and network activation)
+    pub model: &'m SfHalfKpModel,
+    /// Already normalized king positions [White, Black]
+    pub kings: [Square; Color::NUM],
+    /// Accumulator values for each perspective [White, Black]
+    pub accumulator: [[i16; IL_OUT]; Color::NUM]
 }
 
 impl SfHalfKpModel {
