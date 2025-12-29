@@ -104,7 +104,7 @@ pub struct SfHalfKpState<'m> {
 
 impl SfHalfKpModel {
     ///Create a new accumulator state with the given king positions.
-    pub fn new_state(&self, white_king: Square, black_king: Square) -> SfHalfKpState {
+    pub fn new_state(&self, white_king: Square, black_king: Square) -> SfHalfKpState<'_> {
         let mut accumulator = [[0; IL_OUT]; Color::NUM];
         for half in &mut accumulator {
             self.transformer.input_layer.empty(half);
@@ -221,6 +221,7 @@ impl BinRead for SfHalfKpFullModel {
 
     fn read_options<R: Read + Seek>(reader: &mut R, options: &binread::ReadOptions, args: Self::Args) -> BinResult<Self> {        
         #[derive(Debug, BinRead)]
+        #[allow(dead_code)]
         pub struct SfHalfKpModelReader {
             #[br(args(VERSION))]
             version: Magic<u32>,
