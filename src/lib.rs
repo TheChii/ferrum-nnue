@@ -1,9 +1,15 @@
 //!# Rust NNUE inference library
 //!`nnue-rs` is an [NNUE](https://www.chessprogramming.org/NNUE) inference library written in Rust.
+//!
+//! Supports two architectures:
+//! - `stockfish::halfkp`: Full HalfKP (40960→256×2→32→32→1) - Most accurate
+//! - `simple`: Simple 768→384→1 - Much faster
 
 pub mod ops;
 pub mod layers;
 pub mod stockfish;
+pub mod simple;
+pub mod aurora;
 
 macro_rules! simple_enum {
     ($(
