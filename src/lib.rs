@@ -3,12 +3,11 @@
 //!
 //! Supports two architectures:
 //! - `stockfish::halfkp`: Full HalfKP (40960→256×2→32→32→1) - Most accurate
-//! - `simple`: Simple 768→384→1 - Much faster
+//! - `aurora`: Aurora (768→256×2→1) - Fast and accurate
 
 pub mod ops;
 pub mod layers;
 pub mod stockfish;
-pub mod simple;
 pub mod aurora;
 
 macro_rules! simple_enum {

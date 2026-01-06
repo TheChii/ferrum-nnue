@@ -13,7 +13,6 @@
 
 use std::io::Read;
 
-use crate::layers::BitDense;
 use crate::{Square, Piece, Color};
 
 // Network dimensions for Aurora architecture
@@ -22,11 +21,16 @@ pub const HIDDEN: usize = 256;      // Hidden layer size
 pub const OUTPUTS: usize = 1;       // Single output
 
 /// Aurora NNUE model (768→256)×2→1
-/// Uses perspective accumulators like Stockfish HalfKP
+/// Uses heap-allocated weights to avoid stack overflow
 #[derive(Debug, Clone)]
 pub struct AuroraModel {
-    pub input_layer: BitDense<i16, INPUTS, HIDDEN>,
-    pub output_weights: [i16; HIDDEN * 2],  // Weights for both perspectives
+    /// Input layer: 768 × 256 weights (heap allocated)
+    pub input_weights: Box<[[i16; HIDDEN]; INPUTS]>,
+    /// Input layer biases: 256 values
+    pub input_biases: [i16; HIDDEN],
+    /// Output layer weights: 512 values (for both perspectives)
+    pub output_weights: [i16; HIDDEN * 2],
+    /// Output layer bias
     pub output_bias: i16,
 }
 
@@ -42,11 +46,27 @@ impl AuroraModel {
     /// Create a new state with accumulators initialized to biases
     pub fn new_state(&self) -> AuroraState<'_> {
         let mut accumulators = [[0i16; HIDDEN]; 2];
-        self.input_layer.empty(&mut accumulators[0]);
-        self.input_layer.empty(&mut accumulators[1]);
+        accumulators[0] = self.input_biases;
+        accumulators[1] = self.input_biases;
         AuroraState {
             model: self,
             accumulators,
+        }
+    }
+    
+    /// Add feature weights to accumulator
+    #[inline]
+    fn add_feature(&self, index: usize, outputs: &mut [i16; HIDDEN]) {
+        for (o, w) in outputs.iter_mut().zip(&self.input_weights[index]) {
+            *o += *w;
+        }
+    }
+    
+    /// Subtract feature weights from accumulator
+    #[inline]
+    fn sub_feature(&self, index: usize, outputs: &mut [i16; HIDDEN]) {
+        for (o, w) in outputs.iter_mut().zip(&self.input_weights[index]) {
+            *o -= *w;
         }
     }
 }
@@ -78,8 +98,8 @@ impl<'a> AuroraState<'a> {
     pub fn add(&mut self, piece: Piece, piece_color: Color, square: Square) {
         let white_idx = Self::feature_index_white(piece, piece_color, square);
         let black_idx = Self::feature_index_black(piece, piece_color, square);
-        self.model.input_layer.add(white_idx, &mut self.accumulators[0]);
-        self.model.input_layer.add(black_idx, &mut self.accumulators[1]);
+        self.model.add_feature(white_idx, &mut self.accumulators[0]);
+        self.model.add_feature(black_idx, &mut self.accumulators[1]);
     }
 
     /// Remove a piece from both perspective accumulators
@@ -87,8 +107,8 @@ impl<'a> AuroraState<'a> {
     pub fn sub(&mut self, piece: Piece, piece_color: Color, square: Square) {
         let white_idx = Self::feature_index_white(piece, piece_color, square);
         let black_idx = Self::feature_index_black(piece, piece_color, square);
-        self.model.input_layer.sub(white_idx, &mut self.accumulators[0]);
-        self.model.input_layer.sub(black_idx, &mut self.accumulators[1]);
+        self.model.sub_feature(white_idx, &mut self.accumulators[0]);
+        self.model.sub_feature(black_idx, &mut self.accumulators[1]);
     }
 
     /// Refresh accumulators from scratch
@@ -96,8 +116,8 @@ impl<'a> AuroraState<'a> {
     where
         F: FnMut() -> Option<(Piece, Color, Square)>,
     {
-        self.model.input_layer.empty(&mut self.accumulators[0]);
-        self.model.input_layer.empty(&mut self.accumulators[1]);
+        self.accumulators[0] = self.model.input_biases;
+        self.accumulators[1] = self.model.input_biases;
         while let Some((piece, color, square)) = pieces() {
             self.add(piece, color, square);
         }
@@ -157,9 +177,19 @@ pub fn load_model(path: &str) -> Result<AuroraModel, std::io::Error> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
     
+    // Allocate weights on heap to avoid stack overflow
+    // Use unsafe to avoid stack allocation during initialization
+    let mut input_weights: Box<[[i16; HIDDEN]; INPUTS]> = unsafe {
+        let layout = std::alloc::Layout::new::<[[i16; HIDDEN]; INPUTS]>();
+        let ptr = std::alloc::alloc_zeroed(layout) as *mut [[i16; HIDDEN]; INPUTS];
+        if ptr.is_null() {
+            return Err(std::io::Error::new(std::io::ErrorKind::OutOfMemory, "Failed to allocate weights"));
+        }
+        Box::from_raw(ptr)
+    };
+    
     // Read input layer weights: 768 × 256 i16 values
     // Note: Aurora stores as [768][256] (feature-major)
-    let mut input_weights = [[0i16; HIDDEN]; INPUTS];
     for i in 0..INPUTS {
         for j in 0..HIDDEN {
             let mut buf = [0u8; 2];
@@ -190,10 +220,8 @@ pub fn load_model(path: &str) -> Result<AuroraModel, std::io::Error> {
     let output_bias = i16::from_le_bytes(buf);
 
     Ok(AuroraModel {
-        input_layer: BitDense {
-            weights: input_weights,
-            biases: input_biases,
-        },
+        input_weights,
+        input_biases,
         output_weights,
         output_bias,
     })
